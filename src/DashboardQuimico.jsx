@@ -29,7 +29,7 @@ export default function DashboardQuimico() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'NOTIFICAR_CLIENTE', // Reusamos la misma acción, sirve para enviar texto
+          action: 'NOTIFICAR_CLIENTE',
           chatId: chatId,
           mensaje: mensaje
         })
@@ -42,7 +42,6 @@ export default function DashboardQuimico() {
   };
 
   // 2. Función PRINCIPAL: EMITIR DICTAMEN
-  // Ahora recibe también el 'idVendedor' para poder buscarlo
   const emitirDictamen = async (id, dictamen, codigo, chatIdCliente, idVendedor) => {
     
     // A. Confirmación visual
@@ -62,10 +61,10 @@ export default function DashboardQuimico() {
       return;
     }
 
-    // --- C. NOTIFICACIONES (LA MEJORA) ---
+    // --- C. NOTIFICACIONES ---
     let resumenNotificaciones = "Dictamen guardado en BD. ✅";
 
-    // 1. Notificar al CLIENTE (Si tiene Telegram)
+    // 1. Notificar al CLIENTE
     if (chatIdCliente) {
       const msjCliente = dictamen === 'PROCEDE'
         ? `✅ *¡BUENAS NOTICIAS!*\n\nTu reclamo *${codigo}* ha sido APROBADO por garantía.\n\nNos pondremos en contacto contigo para coordinar la solución.`
@@ -75,9 +74,8 @@ export default function DashboardQuimico() {
       resumenNotificaciones += "\n- Cliente notificado 👤";
     }
 
-    // 2. Notificar al VENDEDOR (Nueva Funcionalidad)
+    // 2. Notificar al VENDEDOR
     if (idVendedor) {
-      // Primero buscamos su Chat ID en la tabla perfiles
       const { data: vendedorData } = await supabase
         .from('perfiles')
         .select('telegram_chat_id')
@@ -99,9 +97,29 @@ export default function DashboardQuimico() {
   return (
     <div className="min-h-screen bg-gray-100 p-8">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-800 mb-8 flex items-center gap-3">
-          👨‍🔬 Tablero de Control de Calidad
-        </h1>
+        
+        {/* CABECERA CON BOTÓN SECRETO DE ADMIN */}
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
+            👨‍🔬 Tablero de Control de Calidad
+          </h1>
+          
+          <button 
+            onClick={async () => {
+              // Verificación rápida de rol antes de navegar
+              const { data: { user } } = await supabase.auth.getUser();
+              const { data } = await supabase.from('perfiles').select('rol').eq('id', user.id).single();
+              if (data && data.rol === 'ADMIN') {
+                window.location.href = '/usuarios';
+              } else {
+                alert('⛔ Acceso denegado. Solo personal de Sistemas.');
+              }
+            }}
+            className="text-sm text-gray-500 hover:text-blue-600 underline font-medium transition"
+          >
+            ⚙️ Gestión Usuarios
+          </button>
+        </div>
 
         {loading ? (
           <p className="text-center text-gray-500">Cargando reclamos...</p>
@@ -166,7 +184,6 @@ export default function DashboardQuimico() {
                       {r.estado !== 'CERRADO' && (
                         <>
                           <button
-                            // AQUÍ ESTÁ EL CAMBIO CLAVE: Pasamos r.id_vendedor
                             onClick={() => emitirDictamen(r.id, 'PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
                             className={`p-2 rounded shadow transition text-white 
                               ${r.dictamen === 'PROCEDE' ? 'bg-green-700 ring-2 ring-offset-1 ring-green-500' : 'bg-green-500 hover:bg-green-600'}

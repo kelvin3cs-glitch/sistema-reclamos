@@ -33,14 +33,25 @@ export default function MisReclamos() {
 
   const fetchPendientes = async () => {
     setLoading(true);
+    
+    // 1. OBTENER USUARIO ACTUAL (Para saber quién soy)
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+        setLoading(false);
+        return;
+    }
+
+    // 2. CONSULTA FILTRADA
     const { data, error } = await supabase
       .from('reclamos')
       .select('*')
       .eq('estado', 'EN_GESTION')
+      .eq('id_vendedor', user.id) // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN! (Solo MIS reclamos)
       .order('created_at', { ascending: false });
 
     if (error) console.error('Error:', error);
-    else setReclamos(data);
+    else setReclamos(data || []);
     setLoading(false);
   };
 
@@ -53,7 +64,7 @@ export default function MisReclamos() {
     });
   };
 
-  // --- FUNCIÓN CORREGIDA (SOLUCIÓN DEFINITIVA) ---
+  // --- FUNCIÓN BLINDADA CON LOGS ---
   const notificarCierreQuimicos = async (reclamo, solucion, sustento) => {
     try {
       console.log("🔍 Buscando químicos para notificar...");
@@ -64,17 +75,14 @@ export default function MisReclamos() {
         .eq('rol', 'QUIMICO');
 
       if (error || !quimicos || quimicos.length === 0) {
-        console.warn("⚠️ No se encontraron químicos.");
+        console.warn("⚠️ ALERTA: La lista de químicos vino vacía.");
         return;
       }
 
       console.log(`✅ Encontrados ${quimicos.length} químicos.`);
 
-      // 1. Limpiamos el sustento (como ya tenías)
+      // Limpieza de texto
       const sustentoLimpio = sustento.replace(/\n/g, " ").substring(0, 150);
-
-      // 2. NUEVO: Limpiamos la solución (Quitamos los guiones bajos malditos)
-      // Convierte "NOTA_CREDITO" en "NOTA CREDITO"
       const solucionLimpia = solucion.replace(/_/g, " "); 
 
       const mensaje = `✅ *RECLAMO FINALIZADO*\n\nCaso: *${reclamo.codigo_erp}*\n\n🛠️ Solución: ${solucionLimpia}\n📝 Nota: ${sustentoLimpio}`;
@@ -114,7 +122,6 @@ export default function MisReclamos() {
     if (error) {
       alert('Error al cerrar: ' + error.message);
     } else {
-      // Notificar con la nueva función blindada
       await notificarCierreQuimicos(reclamoSeleccionado, datosCierre.tipo, datosCierre.sustento);
       
       alert('¡Caso cerrado correctamente! 🎉');

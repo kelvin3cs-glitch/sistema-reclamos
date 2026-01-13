@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
-import QRCode from "react-qr-code"; // <--- 1. IMPORTAR LIBRERÍA
-import { useNavigate } from 'react-router-dom'; // Para navegar
+import QRCode from "react-qr-code"; 
+import { useNavigate } from 'react-router-dom';
 
 export default function RegistroReclamo() {
   const [loading, setLoading] = useState(false)
   const [mensaje, setMensaje] = useState(null)
   const navigate = useNavigate();
   
-  // ... (MANTÉN TUS ESTADOS DE FORMULARIO IGUAL QUE ANTES)
   const [formData, setFormData] = useState({
     codigoErp: '',
     dniCliente: '',
@@ -21,7 +20,6 @@ export default function RegistroReclamo() {
   const [vendedorSeleccionado, setVendedorSeleccionado] = useState(null)
   const [reclamoCreado, setReclamoCreado] = useState(null)
 
-  // ... (MANTÉN EL useEffect DE AUTOCOMPLETADO IGUAL)
   useEffect(() => {
     const buscarVendedores = async () => {
       if (busquedaVendedor.length < 2) return setVendedoresEncontrados([])
@@ -37,31 +35,74 @@ export default function RegistroReclamo() {
     return () => clearTimeout(delay)
   }, [busquedaVendedor])
 
-  // ... (MANTÉN EL handleSubmit IGUAL)
+  // --- FUNCIÓN DE NOTIFICACIÓN (NUEVA) ---
+  const notificarQuimicos = async (reclamo, nombreVendedor) => {
+    try {
+      // 1. Buscar a todos los Químicos
+      const { data: quimicos } = await supabase
+        .from('perfiles')
+        .select('telegram_chat_id')
+        .eq('rol', 'QUIMICO');
+
+      if (!quimicos || quimicos.length === 0) return;
+
+      // 2. Mensaje de Alerta
+      const mensajeAlerta = `🚨 *NUEVO RECLAMO PENDIENTE*\n\nCódigo: *${reclamo.codigo_erp}*\nCliente: ${reclamo.nombre_cliente}\nVendedor: ${nombreVendedor}\n\n👉 *Motivo:* ${reclamo.motivo_reclamo}\n\nPor favor ingresa al sistema para emitir tu dictamen técnico.`;
+
+      // 3. Enviar a cada Químico encontrado
+      for (const q of quimicos) {
+        if (q.telegram_chat_id) {
+          await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'NOTIFICAR_CLIENTE', 
+              chatId: q.telegram_chat_id,
+              mensaje: mensajeAlerta
+            })
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Error notificando químicos:", err);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
     setMensaje(null)
     try {
       if (!vendedorSeleccionado) throw new Error('Debes seleccionar un vendedor.')
+      
       const { data: { user } } = await supabase.auth.getUser()
       const idUsuarioActual = user?.id || vendedorSeleccionado.id 
+
       const nuevoReclamo = {
         codigo_erp: formData.codigoErp.toUpperCase(),
         dni_ruc_cliente: formData.dniCliente,
         nombre_cliente: formData.nombreCliente,
         telefono_cliente: formData.telefonoCliente,
         motivo_reclamo: formData.motivo,
-        id_quimico: idUsuarioActual, 
+        id_quimico: idUsuarioActual, // (Opcional: Ajustar si hay lógica de asignación)
         id_vendedor: vendedorSeleccionado.id,
         estado: 'PENDIENTE'
       }
+
       const { data, error } = await supabase.from('reclamos').insert([nuevoReclamo]).select()
+      
       if (error) throw error
-      setReclamoCreado(data[0])
+      
+      const reclamoGuardado = data[0];
+      setReclamoCreado(reclamoGuardado)
+      
+      // --- DISPARAR NOTIFICACIÓN AL QUÍMICO ---
+      await notificarQuimicos(reclamoGuardado, vendedorSeleccionado.nombre_completo);
+
       setFormData({ codigoErp: '', dniCliente: '', nombreCliente: '', telefonoCliente: '', motivo: '' })
       setVendedorSeleccionado(null)
       setBusquedaVendedor('')
+
     } catch (error) {
       setMensaje({ tipo: 'error', texto: error.message })
     } finally {
@@ -69,7 +110,6 @@ export default function RegistroReclamo() {
     }
   }
 
-  // --- RENDERIZADO ACTUALIZADO CON QR ---
   return (
     <div className="max-w-2xl mx-auto p-6 bg-white shadow-lg rounded-lg mt-10">
       <div className="flex justify-between items-center mb-6 border-b pb-2">
@@ -89,9 +129,9 @@ export default function RegistroReclamo() {
         <div className="bg-blue-50 p-6 rounded-lg border border-blue-200 text-center animate-bounce-in flex flex-col items-center">
           <div className="text-5xl mb-3">🎉</div>
           <h3 className="text-xl font-bold text-blue-900">¡Reclamo Registrado!</h3>
-          <p className="text-gray-600 mb-4">Escanea para vincular:</p>
+          <p className="text-gray-600 mb-2">El equipo de Calidad ha sido notificado.</p>
+          <p className="text-gray-600 mb-4 font-bold text-sm">Escanea para vincular al cliente:</p>
           
-          {/* AQUÍ ESTÁ EL QR */}
           <div className="bg-white p-4 rounded shadow-lg mb-4">
             <QRCode 
               value={`https://t.me/rrhh_kacs_bot?start=${reclamoCreado.codigo_erp}`} 
@@ -108,10 +148,7 @@ export default function RegistroReclamo() {
           </button>
         </div>
       ) : (
-        // ... (EL FORMULARIO SIGUE IGUAL)
         <form onSubmit={handleSubmit} className="space-y-4">
-            {/* ... COPIA TU FORMULARIO ANTERIOR AQUÍ (Inputs de Codigo, DNI, Vendedor, Motivo) ... */}
-            {/* ... Por brevedad no lo repito, pero mantén tus inputs igual ... */}
              <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-semibold text-gray-700">Código ERP</label>
@@ -155,6 +192,19 @@ export default function RegistroReclamo() {
             <textarea className="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500 outline-none" rows="2" 
               value={formData.motivo} onChange={e => setFormData({...formData, motivo: e.target.value})}></textarea>
           </div>
+
+          <div>
+            <label className="text-sm font-semibold text-gray-700">Nombre Cliente</label>
+            <input required type="text" className="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Razón Social o Nombre..." 
+              value={formData.nombreCliente} onChange={e => setFormData({...formData, nombreCliente: e.target.value})} />
+          </div>
+
+           <div>
+            <label className="text-sm font-semibold text-gray-700">Teléfono</label>
+            <input type="text" className="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="999..." 
+              value={formData.telefonoCliente} onChange={e => setFormData({...formData, telefonoCliente: e.target.value})} />
+          </div>
+
 
           <button disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">
             {loading ? 'Guardando...' : 'Registrar Reclamo'}

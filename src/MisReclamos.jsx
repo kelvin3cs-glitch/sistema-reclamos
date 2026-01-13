@@ -5,14 +5,11 @@ import { useNavigate } from 'react-router-dom';
 export default function MisReclamos() {
   const [reclamos, setReclamos] = useState([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate(); // Para navegar a "Nuevo Reclamo"
+  const navigate = useNavigate(); 
   
-  // Estado para el Modal de Cierre
   const [reclamoSeleccionado, setReclamoSeleccionado] = useState(null);
   const [datosCierre, setDatosCierre] = useState({ tipo: '', sustento: '' });
 
-  // --- 1. CONFIGURACIÓN DE LAS LISTAS INTELIGENTES ---
-  // Aquí definimos qué opciones ve el vendedor según el dictamen del químico
   const getOpcionesDisponibles = (dictamen) => {
     if (dictamen === 'PROCEDE') {
       return [
@@ -27,7 +24,7 @@ export default function MisReclamos() {
         { value: 'OTRO', label: 'Otro / Cortesía Comercial' }
       ];
     }
-    return []; // Por si acaso
+    return []; 
   };
 
   useEffect(() => {
@@ -36,7 +33,6 @@ export default function MisReclamos() {
 
   const fetchPendientes = async () => {
     setLoading(true);
-    // Solo traemos lo que está EN_GESTION (aprobado/rechazado por químico pero no cerrado)
     const { data, error } = await supabase
       .from('reclamos')
       .select('*')
@@ -48,15 +44,43 @@ export default function MisReclamos() {
     setLoading(false);
   };
 
-  // Función auxiliar para abrir el modal y pre-seleccionar la primera opción válida
   const abrirModalCierre = (reclamo) => {
     const opciones = getOpcionesDisponibles(reclamo.dictamen);
     setReclamoSeleccionado(reclamo);
-    // IMPORTANTE: Seleccionamos la primera opción válida por defecto para evitar errores
     setDatosCierre({ 
       tipo: opciones[0]?.value || '', 
       sustento: '' 
     });
+  };
+
+  // --- FUNCIÓN DE NOTIFICACIÓN CIERRE AL QUIMICO ---
+  const notificarCierreQuimicos = async (reclamo, solucion, sustento) => {
+    try {
+      const { data: quimicos } = await supabase
+        .from('perfiles')
+        .select('telegram_chat_id')
+        .eq('rol', 'QUIMICO');
+
+      if (!quimicos) return;
+
+      const mensaje = `✅ *RECLAMO FINALIZADO*\n\nEl vendedor ha procesado el cierre administrativo del caso *${reclamo.codigo_erp}*.\n\n🛠️ *Solución:* ${solucion}\n📝 *Sustento:* ${sustento}`;
+
+      for (const q of quimicos) {
+        if (q.telegram_chat_id) {
+          await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'NOTIFICAR_CLIENTE', 
+              chatId: q.telegram_chat_id,
+              mensaje: mensaje
+            })
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Error notificando cierre:", err);
+    }
   };
 
   const handleCerrarCaso = async (e) => {
@@ -75,7 +99,10 @@ export default function MisReclamos() {
     if (error) {
       alert('Error al cerrar: ' + error.message);
     } else {
-      alert('¡Caso cerrado correctamente! 🎉');
+      // Notificar al Químico
+      await notificarCierreQuimicos(reclamoSeleccionado, datosCierre.tipo, datosCierre.sustento);
+      
+      alert('¡Caso cerrado correctamente! El químico ha sido notificado. 🎉');
       setReclamoSeleccionado(null);
       fetchPendientes();
     }
@@ -85,7 +112,6 @@ export default function MisReclamos() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-5xl mx-auto">
         
-        {/* CABECERA: Título y Botón Nuevo */}
         <div className="flex justify-between items-center mb-6">
             <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
               💼 Mis Pendientes (Gestión Comercial)
@@ -158,7 +184,6 @@ export default function MisReclamos() {
                     value={datosCierre.tipo}
                     onChange={e => setDatosCierre({...datosCierre, tipo: e.target.value})}
                   >
-                    {/* Renderizamos solo las opciones permitidas */}
                     {getOpcionesDisponibles(reclamoSeleccionado.dictamen).map(opcion => (
                       <option key={opcion.value} value={opcion.value}>
                         {opcion.label}

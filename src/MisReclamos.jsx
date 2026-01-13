@@ -53,7 +53,7 @@ export default function MisReclamos() {
     });
   };
 
-  // --- FUNCIÓN BLINDADA CON LOGS ---
+  // --- FUNCIÓN CORREGIDA (SOLUCIÓN DEFINITIVA) ---
   const notificarCierreQuimicos = async (reclamo, solucion, sustento) => {
     try {
       console.log("🔍 Buscando químicos para notificar...");
@@ -63,22 +63,21 @@ export default function MisReclamos() {
         .select('telegram_chat_id')
         .eq('rol', 'QUIMICO');
 
-      if (error) {
-        console.error("❌ Error buscando químicos:", error);
-        return;
-      }
-
-      if (!quimicos || quimicos.length === 0) {
-        console.warn("⚠️ ALERTA: La lista de químicos vino vacía. Revisa los permisos RLS en Supabase.");
+      if (error || !quimicos || quimicos.length === 0) {
+        console.warn("⚠️ No se encontraron químicos.");
         return;
       }
 
       console.log(`✅ Encontrados ${quimicos.length} químicos.`);
 
-      // Limpiamos el texto para evitar errores de JSON con saltos de línea
+      // 1. Limpiamos el sustento (como ya tenías)
       const sustentoLimpio = sustento.replace(/\n/g, " ").substring(0, 150);
 
-      const mensaje = `✅ *RECLAMO FINALIZADO*\n\nCaso: *${reclamo.codigo_erp}*\n\n🛠️ Solución: ${solucion}\n📝 Nota: ${sustentoLimpio}`;
+      // 2. NUEVO: Limpiamos la solución (Quitamos los guiones bajos malditos)
+      // Convierte "NOTA_CREDITO" en "NOTA CREDITO"
+      const solucionLimpia = solucion.replace(/_/g, " "); 
+
+      const mensaje = `✅ *RECLAMO FINALIZADO*\n\nCaso: *${reclamo.codigo_erp}*\n\n🛠️ Solución: ${solucionLimpia}\n📝 Nota: ${sustentoLimpio}`;
 
       for (const q of quimicos) {
         if (q.telegram_chat_id) {

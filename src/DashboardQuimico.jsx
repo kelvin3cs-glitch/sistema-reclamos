@@ -3,22 +3,44 @@ import { supabase } from './supabaseClient';
 
 export default function DashboardQuimico() {
   const [reclamos, setReclamos] = useState([]);
+  const [nombresVendedores, setNombresVendedores] = useState({}); // 🧠 Memoria para guardar nombres
   const [loading, setLoading] = useState(true);
 
-  // 1. Cargar reclamos al iniciar
+  // 1. Cargar datos al iniciar
   useEffect(() => {
-    fetchReclamos();
+    cargarDatos();
   }, []);
 
-  const fetchReclamos = async () => {
+  const cargarDatos = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    
+    // A. Traer los Reclamos
+    const { data: dataReclamos, error: errorReclamos } = await supabase
       .from('reclamos')
       .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) console.error('Error cargando reclamos:', error);
-    else setReclamos(data);
+    if (errorReclamos) console.error('Error reclamos:', errorReclamos);
+
+    // B. Traer los Nombres de los Vendedores (Perfiles)
+    // Truco: Traemos todos los perfiles para hacer un "cruce" rápido
+    const { data: dataPerfiles, error: errorPerfiles } = await supabase
+      .from('perfiles')
+      .select('id, nombre_completo');
+
+    if (errorPerfiles) console.error('Error perfiles:', errorPerfiles);
+
+    // C. Crear un "Diccionario" de nombres
+    // Convertimos la lista en un objeto: { "id_usuario": "Juan Pérez", ... }
+    const mapaNombres = {};
+    if (dataPerfiles) {
+      dataPerfiles.forEach(perfil => {
+        mapaNombres[perfil.id] = perfil.nombre_completo;
+      });
+    }
+
+    setReclamos(dataReclamos || []);
+    setNombresVendedores(mapaNombres);
     setLoading(false);
   };
 
@@ -44,10 +66,8 @@ export default function DashboardQuimico() {
   // 2. Función PRINCIPAL: EMITIR DICTAMEN
   const emitirDictamen = async (id, dictamen, codigo, chatIdCliente, idVendedor) => {
     
-    // A. Confirmación visual
     if (!confirm(`¿Confirmas que el reclamo ${codigo} ${dictamen}?`)) return;
 
-    // B. Actualizar BD
     const { error } = await supabase
       .from('reclamos')
       .update({
@@ -61,10 +81,9 @@ export default function DashboardQuimico() {
       return;
     }
 
-    // --- C. NOTIFICACIONES ---
     let resumenNotificaciones = "Dictamen guardado en BD. ✅";
 
-    // 1. Notificar al CLIENTE
+    // Notificar al CLIENTE
     if (chatIdCliente) {
       const msjCliente = dictamen === 'PROCEDE'
         ? `✅ *¡BUENAS NOTICIAS!*\n\nTu reclamo *${codigo}* ha sido APROBADO por garantía.\n\nNos pondremos en contacto contigo para coordinar la solución.`
@@ -74,7 +93,7 @@ export default function DashboardQuimico() {
       resumenNotificaciones += "\n- Cliente notificado 👤";
     }
 
-    // 2. Notificar al VENDEDOR
+    // Notificar al VENDEDOR
     if (idVendedor) {
       const { data: vendedorData } = await supabase
         .from('perfiles')
@@ -83,7 +102,7 @@ export default function DashboardQuimico() {
         .single();
 
       if (vendedorData?.telegram_chat_id) {
-        const msjVendedor = `🔔 *ATENCIÓN VENDEDOR*\n\nEl Químico acaba de dictaminar el reclamo *${codigo}*.\n\nDictamen: *${dictamen}*\n\n👉 Por favor ingresa al sistema y realiza el CIERRE ADMINISTRATIVO (Nota de crédito / Rechazo).`;
+        const msjVendedor = `🔔 *ATENCIÓN VENDEDOR*\n\nEl Químico acaba de dictaminar el reclamo *${codigo}*.\n\nDictamen: *${dictamen}*\n\n👉 Por favor ingresa al sistema y realiza el CIERRE ADMINISTRATIVO.`;
         
         await enviarNotificacionTelegram(vendedorData.telegram_chat_id, msjVendedor);
         resumenNotificaciones += "\n- Vendedor notificado 👔";
@@ -91,14 +110,14 @@ export default function DashboardQuimico() {
     }
 
     alert(resumenNotificaciones);
-    fetchReclamos(); // Recargar tabla
+    cargarDatos(); // Recargar tabla
   };
 
   return (
     <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto"> {/* Hice la tabla un poco más ancha (7xl) para que quepa la columna extra */}
         
-        {/* CABECERA CON BOTÓN SECRETO DE ADMIN */}
+        {/* CABECERA */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
             👨‍🔬 Tablero de Control de Calidad
@@ -106,7 +125,6 @@ export default function DashboardQuimico() {
           
           <button 
             onClick={async () => {
-              // Verificación rápida de rol antes de navegar
               const { data: { user } } = await supabase.auth.getUser();
               const { data } = await supabase.from('perfiles').select('rol').eq('id', user.id).single();
               if (data && data.rol === 'ADMIN') {
@@ -126,20 +144,22 @@ export default function DashboardQuimico() {
         ) : (
           <div className="bg-white shadow-md rounded-lg overflow-hidden">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-gray-200 text-gray-700 uppercase text-sm">
+              <thead className="bg-gray-200 text-gray-700 uppercase text-xs">
                 <tr>
                   <th className="p-4 border-b">Fecha</th>
                   <th className="p-4 border-b">Código</th>
                   <th className="p-4 border-b">Cliente</th>
+                  {/* NUEVA COLUMNA */}
+                  <th className="p-4 border-b text-blue-800 bg-blue-50">Vendedor</th> 
                   <th className="p-4 border-b">Estado Telegram</th>
                   <th className="p-4 border-b">Dictamen / Estado</th>
                   <th className="p-4 border-b text-center">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="text-gray-600">
+              <tbody className="text-gray-600 text-sm">
                 {reclamos.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50 border-b last:border-0">
-                    <td className="p-4 text-sm">
+                    <td className="p-4">
                       {new Date(r.created_at).toLocaleDateString()}
                     </td>
                     <td className="p-4 font-mono font-bold text-blue-600">
@@ -148,6 +168,18 @@ export default function DashboardQuimico() {
                     <td className="p-4">
                       {r.nombre_cliente || 'Anónimo'}
                     </td>
+                    
+                    {/* CELDA VENDEDOR */}
+                    <td className="p-4 font-medium text-gray-800 bg-gray-50">
+                      {nombresVendedores[r.id_vendedor] ? (
+                        <span className="flex items-center gap-1">
+                           👤 {nombresVendedores[r.id_vendedor]}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 italic">No asignado</span>
+                      )}
+                    </td>
+
                     <td className="p-4">
                       {r.telegram_chat_id_cliente ? (
                         <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full font-bold">
@@ -160,7 +192,6 @@ export default function DashboardQuimico() {
                       )}
                     </td>
                     <td className="p-4">
-                      {/* ETIQUETAS DE ESTADO */}
                       {r.dictamen ? (
                         <span className={`px-3 py-1 rounded-full text-xs font-bold
                           ${r.dictamen === 'PROCEDE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
@@ -172,21 +203,19 @@ export default function DashboardQuimico() {
                           {r.estado}
                         </span>
                       )}
-                      
-                      {r.estado === 'CERRADO' && (
+                       {r.estado === 'CERRADO' && (
                         <span className="ml-2 text-xs text-gray-400 font-mono border px-1 rounded">
                           CERRADO
                         </span>
                       )}
                     </td>
                     <td className="p-4 flex justify-center gap-2">
-                      {/* BOTONES DE ACCIÓN */}
                       {r.estado !== 'CERRADO' && (
                         <>
                           <button
                             onClick={() => emitirDictamen(r.id, 'PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
                             className={`p-2 rounded shadow transition text-white 
-                              ${r.dictamen === 'PROCEDE' ? 'bg-green-700 ring-2 ring-offset-1 ring-green-500' : 'bg-green-500 hover:bg-green-600'}
+                              ${r.dictamen === 'PROCEDE' ? 'bg-green-700' : 'bg-green-500 hover:bg-green-600'}
                             `}
                             title="Dictamen: PROCEDE"
                           >
@@ -196,7 +225,7 @@ export default function DashboardQuimico() {
                           <button
                             onClick={() => emitirDictamen(r.id, 'NO PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
                             className={`p-2 rounded shadow transition text-white 
-                              ${r.dictamen === 'NO PROCEDE' ? 'bg-red-700 ring-2 ring-offset-1 ring-red-500' : 'bg-red-500 hover:bg-red-600'}
+                              ${r.dictamen === 'NO PROCEDE' ? 'bg-red-700' : 'bg-red-500 hover:bg-red-600'}
                             `}
                             title="Dictamen: NO PROCEDE"
                           >

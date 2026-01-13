@@ -53,7 +53,7 @@ export default function MisReclamos() {
     });
   };
 
-  // --- FUNCIÓN DE NOTIFICACIÓN CIERRE AL QUIMICO ---
+  // --- FUNCIÓN DE NOTIFICACIÓN CIERRE AL QUIMICO (LA QUE FALTABA) ---
   const notificarCierreQuimicos = async (reclamo, solucion, sustento) => {
     try {
       const { data: quimicos } = await supabase
@@ -102,7 +102,9 @@ export default function MisReclamos() {
       // Notificar al Químico
       await notificarCierreQuimicos(reclamoSeleccionado, datosCierre.tipo, datosCierre.sustento);
       
+      // ESTA ES LA NUEVA ALERTA QUE DEBES VER
       alert('¡Caso cerrado correctamente! El químico ha sido notificado. 🎉');
+      
       setReclamoSeleccionado(null);
       fetchPendientes();
     }

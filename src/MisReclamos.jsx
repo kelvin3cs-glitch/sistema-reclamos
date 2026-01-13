@@ -54,20 +54,31 @@ export default function MisReclamos() {
   };
 
   // --- FUNCIÓN DE NOTIFICACIÓN CIERRE AL QUIMICO (LA QUE FALTABA) ---
+  // --- FUNCIÓN MEJORADA Y BLINDADA ---
   const notificarCierreQuimicos = async (reclamo, solucion, sustento) => {
     try {
+      console.log("Intentando notificar cierre a químicos..."); // 1. Log para depurar
+      
       const { data: quimicos } = await supabase
         .from('perfiles')
         .select('telegram_chat_id')
         .eq('rol', 'QUIMICO');
 
-      if (!quimicos) return;
+      if (!quimicos || quimicos.length === 0) {
+        console.warn("No se encontraron químicos para notificar.");
+        return;
+      }
 
-      const mensaje = `✅ *RECLAMO FINALIZADO*\n\nEl vendedor ha procesado el cierre administrativo del caso *${reclamo.codigo_erp}*.\n\n🛠️ *Solución:* ${solucion}\n📝 *Sustento:* ${sustento}`;
+      // 2. Limpieza de texto para evitar errores JSON
+      const sustentoLimpio = sustento.replace(/\n/g, " ").substring(0, 100); // Quitamos enters y limitamos largo
+
+      const mensaje = `✅ *RECLAMO FINALIZADO*\n\nCaso: *${reclamo.codigo_erp}*\n\n🛠️ Solución: ${solucion}\n📝 Nota: ${sustentoLimpio}`;
 
       for (const q of quimicos) {
         if (q.telegram_chat_id) {
-          await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
+          console.log(`Enviando a ${q.telegram_chat_id}...`);
+          
+          const response = await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -76,10 +87,15 @@ export default function MisReclamos() {
               mensaje: mensaje
             })
           });
+          
+          if (!response.ok) {
+            console.error("Error en respuesta de Edge Function:", await response.text());
+          }
         }
       }
+      console.log("Notificaciones enviadas.");
     } catch (err) {
-      console.error("Error notificando cierre:", err);
+      console.error("CRASH notificando cierre:", err);
     }
   };
 

@@ -53,32 +53,37 @@ export default function MisReclamos() {
     });
   };
 
-  // --- FUNCIÓN DE NOTIFICACIÓN CIERRE AL QUIMICO (LA QUE FALTABA) ---
-  // --- FUNCIÓN MEJORADA Y BLINDADA ---
+  // --- FUNCIÓN BLINDADA CON LOGS ---
   const notificarCierreQuimicos = async (reclamo, solucion, sustento) => {
     try {
-      console.log("Intentando notificar cierre a químicos..."); // 1. Log para depurar
+      console.log("🔍 Buscando químicos para notificar...");
       
-      const { data: quimicos } = await supabase
+      const { data: quimicos, error } = await supabase
         .from('perfiles')
         .select('telegram_chat_id')
         .eq('rol', 'QUIMICO');
 
-      if (!quimicos || quimicos.length === 0) {
-        console.warn("No se encontraron químicos para notificar.");
+      if (error) {
+        console.error("❌ Error buscando químicos:", error);
         return;
       }
 
-      // 2. Limpieza de texto para evitar errores JSON
-      const sustentoLimpio = sustento.replace(/\n/g, " ").substring(0, 100); // Quitamos enters y limitamos largo
+      if (!quimicos || quimicos.length === 0) {
+        console.warn("⚠️ ALERTA: La lista de químicos vino vacía. Revisa los permisos RLS en Supabase.");
+        return;
+      }
+
+      console.log(`✅ Encontrados ${quimicos.length} químicos.`);
+
+      // Limpiamos el texto para evitar errores de JSON con saltos de línea
+      const sustentoLimpio = sustento.replace(/\n/g, " ").substring(0, 150);
 
       const mensaje = `✅ *RECLAMO FINALIZADO*\n\nCaso: *${reclamo.codigo_erp}*\n\n🛠️ Solución: ${solucion}\n📝 Nota: ${sustentoLimpio}`;
 
       for (const q of quimicos) {
         if (q.telegram_chat_id) {
-          console.log(`Enviando a ${q.telegram_chat_id}...`);
-          
-          const response = await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
+          console.log(`📤 Enviando a ID: ${q.telegram_chat_id}`);
+          await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -87,15 +92,10 @@ export default function MisReclamos() {
               mensaje: mensaje
             })
           });
-          
-          if (!response.ok) {
-            console.error("Error en respuesta de Edge Function:", await response.text());
-          }
         }
       }
-      console.log("Notificaciones enviadas.");
     } catch (err) {
-      console.error("CRASH notificando cierre:", err);
+      console.error("💥 CRASH en notificación:", err);
     }
   };
 
@@ -115,12 +115,10 @@ export default function MisReclamos() {
     if (error) {
       alert('Error al cerrar: ' + error.message);
     } else {
-      // Notificar al Químico
+      // Notificar con la nueva función blindada
       await notificarCierreQuimicos(reclamoSeleccionado, datosCierre.tipo, datosCierre.sustento);
       
-      // ESTA ES LA NUEVA ALERTA QUE DEBES VER
-      alert('¡Caso cerrado correctamente! El químico ha sido notificado. 🎉');
-      
+      alert('¡Caso cerrado correctamente! 🎉');
       setReclamoSeleccionado(null);
       fetchPendientes();
     }

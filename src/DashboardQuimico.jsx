@@ -12,7 +12,6 @@ export default function DashboardQuimico() {
 
   const fetchReclamos = async () => {
     setLoading(true);
-    // Seleccionamos TODAS las columnas (incluyendo las nuevas: dictamen, tipo_solucion)
     const { data, error } = await supabase
       .from('reclamos')
       .select('*')
@@ -23,53 +22,77 @@ export default function DashboardQuimico() {
     setLoading(false);
   };
 
-  // 2. Función para EMITIR DICTAMEN (El Químico decide)
-  const emitirDictamen = async (id, dictamen, codigo, chatIdCliente) => {
+  // Función auxiliar para enviar mensaje al Bot
+  const enviarNotificacionTelegram = async (chatId, mensaje) => {
+    try {
+      await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'NOTIFICAR_CLIENTE', // Reusamos la misma acción, sirve para enviar texto
+          chatId: chatId,
+          mensaje: mensaje
+        })
+      });
+      return true;
+    } catch (err) {
+      console.error("Error enviando Telegram:", err);
+      return false;
+    }
+  };
+
+  // 2. Función PRINCIPAL: EMITIR DICTAMEN
+  // Ahora recibe también el 'idVendedor' para poder buscarlo
+  const emitirDictamen = async (id, dictamen, codigo, chatIdCliente, idVendedor) => {
+    
     // A. Confirmación visual
     if (!confirm(`¿Confirmas que el reclamo ${codigo} ${dictamen}?`)) return;
 
-    // B. Actualizar BD:
-    // - Guardamos el DICTAMEN (Opinión técnica)
-    // - Cambiamos ESTADO a 'EN_GESTION' (Para que le aparezca al vendedor)
+    // B. Actualizar BD
     const { error } = await supabase
       .from('reclamos')
       .update({
-        dictamen: dictamen,       // 'PROCEDE' o 'NO PROCEDE'
-        estado: 'EN_GESTION'      // Pasa a la cancha del vendedor
+        dictamen: dictamen,
+        estado: 'EN_GESTION'
       })
       .eq('id', id);
 
     if (error) {
-      console.error("Error BD:", error);
       alert('Error al guardar dictamen: ' + error.message);
       return;
     }
 
-    // C. Notificar al Cliente (Telegram)
-    if (chatIdCliente) {
-      const mensaje = dictamen === 'PROCEDE'
-        ? `✅ *¡BUENAS NOTICIAS!*\n\nTu reclamo *${codigo}* ha sido revisado y PROCEDE por garantía.\n\nNos pondremos en contacto contigo para coordinar la solución.`
-        : `❌ *ACTUALIZACIÓN*\n\nTu reclamo *${codigo}* ha sido revisado y se determinó que NO PROCEDE.\n\nEl asesor te contactará para explicarte los detalles.`;
+    // --- C. NOTIFICACIONES (LA MEJORA) ---
+    let resumenNotificaciones = "Dictamen guardado en BD. ✅";
 
-      try {
-        await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'NOTIFICAR_CLIENTE',
-            chatId: chatIdCliente,
-            mensaje: mensaje
-          })
-        });
-        alert(`Dictamen guardado y cliente notificado! 📤`);
-      } catch (err) {
-        console.error(err);
-        alert('Se guardó el dictamen, pero falló el envío a Telegram.');
-      }
-    } else {
-      alert('Dictamen guardado (Sin Telegram vinculado).');
+    // 1. Notificar al CLIENTE (Si tiene Telegram)
+    if (chatIdCliente) {
+      const msjCliente = dictamen === 'PROCEDE'
+        ? `✅ *¡BUENAS NOTICIAS!*\n\nTu reclamo *${codigo}* ha sido APROBADO por garantía.\n\nNos pondremos en contacto contigo para coordinar la solución.`
+        : `❌ *ACTUALIZACIÓN*\n\nTu reclamo *${codigo}* ha sido revisado y se determinó que NO PROCEDE.\n\nEl asesor te contactará para explicarte los detalles.`;
+      
+      await enviarNotificacionTelegram(chatIdCliente, msjCliente);
+      resumenNotificaciones += "\n- Cliente notificado 👤";
     }
 
+    // 2. Notificar al VENDEDOR (Nueva Funcionalidad)
+    if (idVendedor) {
+      // Primero buscamos su Chat ID en la tabla perfiles
+      const { data: vendedorData } = await supabase
+        .from('perfiles')
+        .select('telegram_chat_id')
+        .eq('id', idVendedor)
+        .single();
+
+      if (vendedorData?.telegram_chat_id) {
+        const msjVendedor = `🔔 *ATENCIÓN VENDEDOR*\n\nEl Químico acaba de dictaminar el reclamo *${codigo}*.\n\nDictamen: *${dictamen}*\n\n👉 Por favor ingresa al sistema y realiza el CIERRE ADMINISTRATIVO (Nota de crédito / Rechazo).`;
+        
+        await enviarNotificacionTelegram(vendedorData.telegram_chat_id, msjVendedor);
+        resumenNotificaciones += "\n- Vendedor notificado 👔";
+      }
+    }
+
+    alert(resumenNotificaciones);
     fetchReclamos(); // Recargar tabla
   };
 
@@ -119,22 +142,19 @@ export default function DashboardQuimico() {
                       )}
                     </td>
                     <td className="p-4">
-                      {/* LÓGICA DE ETIQUETAS INTELIGENTE */}
+                      {/* ETIQUETAS DE ESTADO */}
                       {r.dictamen ? (
-                        // Si YA tiene dictamen, mostramos eso (Verde o Rojo)
                         <span className={`px-3 py-1 rounded-full text-xs font-bold
                           ${r.dictamen === 'PROCEDE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
                         `}>
                           {r.dictamen}
                         </span>
                       ) : (
-                        // Si NO tiene dictamen, mostramos el estado (Pendiente)
                         <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold">
                           {r.estado}
                         </span>
                       )}
                       
-                      {/* Si está cerrado, agregamos una marquita extra */}
                       {r.estado === 'CERRADO' && (
                         <span className="ml-2 text-xs text-gray-400 font-mono border px-1 rounded">
                           CERRADO
@@ -142,11 +162,12 @@ export default function DashboardQuimico() {
                       )}
                     </td>
                     <td className="p-4 flex justify-center gap-2">
-                      {/* Solo mostramos botones si NO está cerrado (o si queremos permitir corregir) */}
+                      {/* BOTONES DE ACCIÓN */}
                       {r.estado !== 'CERRADO' && (
                         <>
                           <button
-                            onClick={() => emitirDictamen(r.id, 'PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente)}
+                            // AQUÍ ESTÁ EL CAMBIO CLAVE: Pasamos r.id_vendedor
+                            onClick={() => emitirDictamen(r.id, 'PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
                             className={`p-2 rounded shadow transition text-white 
                               ${r.dictamen === 'PROCEDE' ? 'bg-green-700 ring-2 ring-offset-1 ring-green-500' : 'bg-green-500 hover:bg-green-600'}
                             `}
@@ -156,7 +177,7 @@ export default function DashboardQuimico() {
                           </button>
 
                           <button
-                            onClick={() => emitirDictamen(r.id, 'NO PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente)}
+                            onClick={() => emitirDictamen(r.id, 'NO PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
                             className={`p-2 rounded shadow transition text-white 
                               ${r.dictamen === 'NO PROCEDE' ? 'bg-red-700 ring-2 ring-offset-1 ring-red-500' : 'bg-red-500 hover:bg-red-600'}
                             `}

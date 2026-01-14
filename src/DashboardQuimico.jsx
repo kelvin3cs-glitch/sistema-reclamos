@@ -9,11 +9,24 @@ export default function DashboardQuimico() {
   // --- 1. ESTADOS PARA LOS FILTROS ---
   const [textoBusqueda, setTextoBusqueda] = useState('');
   const [filtroVendedor, setFiltroVendedor] = useState('TODOS');
-  const [filtroEstado, setFiltroEstado] = useState('TODOS'); // Por defecto ver todo
+  const [filtroEstado, setFiltroEstado] = useState('TODOS'); 
   
+  // NUEVO: Filtros de Fecha
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
+
+  // NUEVO: Paginación
+  const [paginaActual, setPaginaActual] = useState(1);
+  const ELEMENTOS_POR_PAGINA = 10; // Puedes cambiar esto a 5 o 20
+
   useEffect(() => {
     cargarDatos();
   }, []);
+
+  // Efecto para volver a la página 1 si cambian los filtros
+  useEffect(() => {
+    setPaginaActual(1);
+  }, [textoBusqueda, filtroVendedor, filtroEstado, fechaInicio, fechaFin]);
 
   const cargarDatos = async () => {
     setLoading(true);
@@ -26,12 +39,11 @@ export default function DashboardQuimico() {
 
     if (errorReclamos) console.error('Error reclamos:', errorReclamos);
 
-    // B. Traer Vendedores
+    // B. Traer SOLO VENDEDORES (Corrección solicitada)
     const { data: dataPerfiles, error: errorPerfiles } = await supabase
       .from('perfiles')
       .select('id, nombre_completo')
-      // Opcional: Podríamos filtrar solo rol='ASESOR_VENTAS' si quisieras limpiar la lista
-      // .eq('rol', 'ASESOR_VENTAS'); 
+      .eq('rol', 'ASESOR_VENTAS'); // <--- AQUI ESTA EL FILTRO CLAVE 
 
     if (errorPerfiles) console.error('Error perfiles:', errorPerfiles);
 
@@ -102,9 +114,9 @@ export default function DashboardQuimico() {
     cargarDatos();
   };
 
-  // --- 2. LÓGICA DE FILTRADO (El Cerebro) ---
+  // --- 2. LÓGICA DE FILTRADO ---
   const reclamosFiltrados = reclamos.filter(r => {
-    // A. Filtro de Texto (Busca en Código o Cliente)
+    // A. Filtro de Texto
     const texto = textoBusqueda.toUpperCase();
     const coincideTexto = 
       r.codigo_erp.includes(texto) || 
@@ -115,27 +127,42 @@ export default function DashboardQuimico() {
       filtroVendedor === 'TODOS' || 
       r.id_vendedor === filtroVendedor;
 
-    // C. Filtro de Estado (Pendiente vs Listos)
+    // C. Filtro de Estado
     let coincideEstado = true;
-    if (filtroEstado === 'PENDIENTES') {
-      // Solo mostramos los que NO tienen dictamen aún
-      coincideEstado = !r.dictamen; 
-    } else if (filtroEstado === 'LISTOS') {
-      coincideEstado = !!r.dictamen; // Tienen dictamen (Procede/No procede)
+    if (filtroEstado === 'PENDIENTES') coincideEstado = !r.dictamen; 
+    else if (filtroEstado === 'LISTOS') coincideEstado = !!r.dictamen;
+
+    // D. NUEVO: Filtro de Fechas
+    let coincideFecha = true;
+    if (fechaInicio) {
+      const fechaItem = new Date(r.created_at).toISOString().split('T')[0];
+      if (fechaItem < fechaInicio) coincideFecha = false;
+    }
+    if (fechaFin) {
+      const fechaItem = new Date(r.created_at).toISOString().split('T')[0];
+      if (fechaItem > fechaFin) coincideFecha = false;
     }
 
-    return coincideTexto && coincideVendedor && coincideEstado;
+    return coincideTexto && coincideVendedor && coincideEstado && coincideFecha;
   });
+
+  // --- 3. LÓGICA DE PAGINACIÓN ---
+  const indiceUltimoElemento = paginaActual * ELEMENTOS_POR_PAGINA;
+  const indicePrimerElemento = indiceUltimoElemento - ELEMENTOS_POR_PAGINA;
+  const reclamosPaginados = reclamosFiltrados.slice(indicePrimerElemento, indiceUltimoElemento);
+  const totalPaginas = Math.ceil(reclamosFiltrados.length / ELEMENTOS_POR_PAGINA);
+
+  const cambiarPagina = (numeroPagina) => setPaginaActual(numeroPagina);
 
   return (
     <div className="min-h-screen bg-gray-100 p-8">
       <div className="max-w-7xl mx-auto">
         
+        {/* Cabecera */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-3">
             👨‍🔬 Tablero de Control de Calidad
           </h1>
-          
           <button 
             onClick={async () => {
               const { data: { user } } = await supabase.auth.getUser();
@@ -149,165 +176,240 @@ export default function DashboardQuimico() {
           </button>
         </div>
 
-        {/* --- 3. BARRA DE HERRAMIENTAS (NUEVO) --- */}
-        <div className="bg-white p-4 rounded-lg shadow-sm mb-6 flex flex-wrap gap-4 items-end border border-gray-200">
-          
-          {/* Buscador */}
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-bold text-gray-500 mb-1">BUSCAR (CÓDIGO / CLIENTE)</label>
-            <div className="relative">
-              <input 
-                type="text" 
-                placeholder="Ej: TEST-001 o Erick"
-                className="w-full border p-2 pl-8 rounded focus:ring-2 focus:ring-blue-500 outline-none uppercase"
-                value={textoBusqueda}
-                onChange={e => setTextoBusqueda(e.target.value)}
-              />
-              <span className="absolute left-2 top-2 text-gray-400">🔍</span>
+        {/* --- BARRA DE HERRAMIENTAS (ACTUALIZADA) --- */}
+        <div className="bg-white p-4 rounded-lg shadow-sm mb-6 border border-gray-200">
+          <div className="flex flex-wrap gap-4 items-end">
+            
+            {/* Buscador */}
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs font-bold text-gray-500 mb-1">BUSCAR (CÓDIGO / CLIENTE)</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  placeholder="Ej: TEST-001 o Erick"
+                  className="w-full border p-2 pl-8 rounded focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                  value={textoBusqueda}
+                  onChange={e => setTextoBusqueda(e.target.value)}
+                />
+                <span className="absolute left-2 top-2 text-gray-400">🔍</span>
+              </div>
             </div>
+
+            {/* Filtro Vendedor */}
+            <div className="w-full sm:w-56">
+               <label className="block text-xs font-bold text-gray-500 mb-1">FILTRAR POR VENDEDOR</label>
+               <select 
+                 className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                 value={filtroVendedor}
+                 onChange={e => setFiltroVendedor(e.target.value)}
+               >
+                 <option value="TODOS">🧑‍💼 Todos los Vendedores</option>
+                 {Object.keys(nombresVendedores).map(id => (
+                   <option key={id} value={id}>
+                     {nombresVendedores[id]}
+                   </option>
+                 ))}
+               </select>
+            </div>
+
+            {/* Filtro Estado */}
+            <div className="w-full sm:w-40">
+               <label className="block text-xs font-bold text-gray-500 mb-1">ESTADO / TAREA</label>
+               <select 
+                 className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                 value={filtroEstado}
+                 onChange={e => setFiltroEstado(e.target.value)}
+               >
+                 <option value="TODOS">📊 Ver Todo</option>
+                 <option value="PENDIENTES">⏳ Solo Pendientes</option>
+                 <option value="LISTOS">✅ Ya Dictaminados</option>
+               </select>
+            </div>
+
           </div>
 
-          {/* Filtro Vendedor */}
-          <div className="w-full sm:w-64">
-             <label className="block text-xs font-bold text-gray-500 mb-1">FILTRAR POR VENDEDOR</label>
-             <select 
-               className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-               value={filtroVendedor}
-               onChange={e => setFiltroVendedor(e.target.value)}
-             >
-               <option value="TODOS">🧑‍💼 Todos los Vendedores</option>
-               {/* Generamos las opciones dinámicamente desde el diccionario de nombres */}
-               {Object.keys(nombresVendedores).map(id => (
-                 <option key={id} value={id}>
-                   {nombresVendedores[id]}
-                 </option>
-               ))}
-             </select>
+          {/* NUEVA FILA: Fechas */}
+          <div className="flex flex-wrap gap-4 items-end mt-4 pt-4 border-t border-gray-100">
+             <div className="w-full sm:w-auto">
+               <label className="block text-xs font-bold text-gray-500 mb-1">FECHA DESDE</label>
+               <input 
+                  type="date" 
+                  className="border p-2 rounded w-full sm:w-40 focus:ring-2 focus:ring-blue-500"
+                  value={fechaInicio}
+                  onChange={e => setFechaInicio(e.target.value)}
+               />
+             </div>
+             <div className="w-full sm:w-auto">
+               <label className="block text-xs font-bold text-gray-500 mb-1">FECHA HASTA</label>
+               <input 
+                  type="date" 
+                  className="border p-2 rounded w-full sm:w-40 focus:ring-2 focus:ring-blue-500"
+                  value={fechaFin}
+                  onChange={e => setFechaFin(e.target.value)}
+               />
+             </div>
+             {(fechaInicio || fechaFin) && (
+               <button 
+                 onClick={() => { setFechaInicio(''); setFechaFin(''); }}
+                 className="text-xs text-red-500 hover:text-red-700 underline mb-3"
+               >
+                 Borrar fechas
+               </button>
+             )}
           </div>
-
-          {/* Filtro Estado */}
-          <div className="w-full sm:w-48">
-             <label className="block text-xs font-bold text-gray-500 mb-1">ESTADO / TAREA</label>
-             <select 
-               className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-               value={filtroEstado}
-               onChange={e => setFiltroEstado(e.target.value)}
-             >
-               <option value="TODOS">📊 Ver Todo</option>
-               <option value="PENDIENTES">⏳ Solo Pendientes</option>
-               <option value="LISTOS">✅ Ya Dictaminados</option>
-             </select>
-          </div>
-          
         </div>
 
         {loading ? (
           <p className="text-center text-gray-500">Cargando reclamos...</p>
         ) : (
-          <div className="bg-white shadow-md rounded-lg overflow-hidden">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-gray-200 text-gray-700 uppercase text-xs">
-                <tr>
-                  <th className="p-4 border-b">Fecha</th>
-                  <th className="p-4 border-b">Código</th>
-                  <th className="p-4 border-b">Cliente</th>
-                  <th className="p-4 border-b text-blue-800 bg-blue-50">Vendedor</th> 
-                  <th className="p-4 border-b">Estado Telegram</th>
-                  <th className="p-4 border-b">Dictamen / Estado</th>
-                  <th className="p-4 border-b text-center">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="text-gray-600 text-sm">
-                {/* OJO: Aquí iteramos sobre 'reclamosFiltrados', no sobre 'reclamos' */}
-                {reclamosFiltrados.length > 0 ? (
-                  reclamosFiltrados.map((r) => (
-                    <tr key={r.id} className="hover:bg-gray-50 border-b last:border-0">
-                      <td className="p-4">
-                        {new Date(r.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="p-4 font-mono font-bold text-blue-600">
-                        {r.codigo_erp}
-                      </td>
-                      <td className="p-4">
-                        {r.nombre_cliente || 'Anónimo'}
-                      </td>
-                      
-                      <td className="p-4 font-medium text-gray-800 bg-gray-50">
-                        {nombresVendedores[r.id_vendedor] ? (
-                          <span className="flex items-center gap-1">
-                             👤 {nombresVendedores[r.id_vendedor]}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 italic">No asignado</span>
-                        )}
-                      </td>
+          <div className="bg-white shadow-md rounded-lg overflow-hidden flex flex-col min-h-[500px]"> 
+            
+            {/* Tabla con scroll horizontal si es necesario */}
+            <div className="overflow-x-auto flex-grow">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-gray-200 text-gray-700 uppercase text-xs">
+                  <tr>
+                    <th className="p-4 border-b">Fecha</th>
+                    <th className="p-4 border-b">Código</th>
+                    <th className="p-4 border-b">Cliente</th>
+                    <th className="p-4 border-b text-blue-800 bg-blue-50">Vendedor</th> 
+                    <th className="p-4 border-b">Estado Telegram</th>
+                    <th className="p-4 border-b">Dictamen / Estado</th>
+                    <th className="p-4 border-b text-center">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="text-gray-600 text-sm">
+                  {reclamosPaginados.length > 0 ? (
+                    reclamosPaginados.map((r) => (
+                      <tr key={r.id} className="hover:bg-gray-50 border-b last:border-0">
+                        <td className="p-4 whitespace-nowrap">
+                          {new Date(r.created_at).toLocaleDateString()}
+                        </td>
+                        <td className="p-4 font-mono font-bold text-blue-600">
+                          {r.codigo_erp}
+                        </td>
+                        <td className="p-4">
+                          {r.nombre_cliente || 'Anónimo'}
+                        </td>
+                        <td className="p-4 font-medium text-gray-800 bg-gray-50">
+                          {nombresVendedores[r.id_vendedor] ? (
+                            <span className="flex items-center gap-1">
+                               👤 {nombresVendedores[r.id_vendedor]}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 italic">No asignado</span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {r.telegram_chat_id_cliente ? (
+                            <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full font-bold">
+                              ✅ Vinculado
+                            </span>
+                          ) : (
+                            <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">
+                              ⏳ Esperando
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {r.dictamen ? (
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold
+                              ${r.dictamen === 'PROCEDE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
+                            `}>
+                              {r.dictamen}
+                            </span>
+                          ) : (
+                            <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold">
+                              {r.estado}
+                            </span>
+                          )}
+                           {r.estado === 'CERRADO' && (
+                            <span className="ml-2 text-xs text-gray-400 font-mono border px-1 rounded">
+                              CERRADO
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 flex justify-center gap-2">
+                          {r.estado !== 'CERRADO' && (
+                            <>
+                              <button
+                                onClick={() => emitirDictamen(r.id, 'PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
+                                className={`p-2 rounded shadow transition text-white 
+                                  ${r.dictamen === 'PROCEDE' ? 'bg-green-700' : 'bg-green-500 hover:bg-green-600'}
+                                `}
+                                title="Dictamen: PROCEDE"
+                              >
+                                ✅
+                              </button>
 
-                      <td className="p-4">
-                        {r.telegram_chat_id_cliente ? (
-                          <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full font-bold">
-                            ✅ Vinculado
-                          </span>
-                        ) : (
-                          <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded-full">
-                            ⏳ Esperando
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        {r.dictamen ? (
-                          <span className={`px-3 py-1 rounded-full text-xs font-bold
-                            ${r.dictamen === 'PROCEDE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
-                          `}>
-                            {r.dictamen}
-                          </span>
-                        ) : (
-                          <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-bold">
-                            {r.estado}
-                          </span>
-                        )}
-                         {r.estado === 'CERRADO' && (
-                          <span className="ml-2 text-xs text-gray-400 font-mono border px-1 rounded">
-                            CERRADO
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 flex justify-center gap-2">
-                        {r.estado !== 'CERRADO' && (
-                          <>
-                            <button
-                              onClick={() => emitirDictamen(r.id, 'PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
-                              className={`p-2 rounded shadow transition text-white 
-                                ${r.dictamen === 'PROCEDE' ? 'bg-green-700' : 'bg-green-500 hover:bg-green-600'}
-                              `}
-                              title="Dictamen: PROCEDE"
-                            >
-                              ✅
-                            </button>
-
-                            <button
-                              onClick={() => emitirDictamen(r.id, 'NO PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
-                              className={`p-2 rounded shadow transition text-white 
-                                ${r.dictamen === 'NO PROCEDE' ? 'bg-red-700' : 'bg-red-500 hover:bg-red-600'}
-                              `}
-                              title="Dictamen: NO PROCEDE"
-                            >
-                              ❌
-                            </button>
-                          </>
-                        )}
+                              <button
+                                onClick={() => emitirDictamen(r.id, 'NO PROCEDE', r.codigo_erp, r.telegram_chat_id_cliente, r.id_vendedor)}
+                                className={`p-2 rounded shadow transition text-white 
+                                  ${r.dictamen === 'NO PROCEDE' ? 'bg-red-700' : 'bg-red-500 hover:bg-red-600'}
+                                `}
+                                title="Dictamen: NO PROCEDE"
+                              >
+                                ❌
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="7" className="p-8 text-center text-gray-500 italic">
+                        No se encontraron reclamos con estos filtros. 🕵️‍♂️
                       </td>
                     </tr>
-                  ))
-                ) : (
-                  // Si no hay resultados con los filtros
-                  <tr>
-                    <td colSpan="7" className="p-8 text-center text-gray-500 italic">
-                      No se encontraron reclamos con estos filtros. 🕵️‍♂️
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* --- CONTROLES DE PAGINACIÓN --- */}
+            {totalPaginas > 1 && (
+              <div className="bg-gray-50 border-t p-4 flex justify-between items-center">
+                <span className="text-sm text-gray-500">
+                  Mostrando {reclamosPaginados.length} de {reclamosFiltrados.length} resultados
+                </span>
+                
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => cambiarPagina(paginaActual - 1)}
+                    disabled={paginaActual === 1}
+                    className={`px-3 py-1 rounded border text-sm font-bold 
+                      ${paginaActual === 1 ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-white hover:bg-gray-100 text-gray-700'}`}
+                  >
+                    Anterior
+                  </button>
+
+                  {/* Números de página */}
+                  {[...Array(totalPaginas)].map((_, i) => (
+                    <button
+                      key={i + 1}
+                      onClick={() => cambiarPagina(i + 1)}
+                      className={`px-3 py-1 rounded border text-sm font-bold
+                        ${paginaActual === i + 1 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-white hover:bg-gray-100 text-gray-700'}`}
+                    >
+                      {i + 1}
+                    </button>
+                  ))}
+
+                  <button 
+                    onClick={() => cambiarPagina(paginaActual + 1)}
+                    disabled={paginaActual === totalPaginas}
+                    className={`px-3 py-1 rounded border text-sm font-bold 
+                      ${paginaActual === totalPaginas ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-white hover:bg-gray-100 text-gray-700'}`}
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
       </div>

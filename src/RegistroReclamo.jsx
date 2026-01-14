@@ -8,6 +8,9 @@ export default function RegistroReclamo() {
   const [mensaje, setMensaje] = useState(null)
   const navigate = useNavigate();
   
+  // Estado para saber quién está logueado (TÚ)
+  const [usuarioActual, setUsuarioActual] = useState(null);
+
   const [formData, setFormData] = useState({
     codigoErp: '',
     dniCliente: '',
@@ -15,30 +18,32 @@ export default function RegistroReclamo() {
     telefonoCliente: '',
     motivo: ''
   })
-  const [busquedaVendedor, setBusquedaVendedor] = useState('')
-  const [vendedoresEncontrados, setVendedoresEncontrados] = useState([])
-  const [vendedorSeleccionado, setVendedorSeleccionado] = useState(null)
+  
   const [reclamoCreado, setReclamoCreado] = useState(null)
 
+  // 1. AL CARGAR: Detectar automáticamente al Vendedor logueado
   useEffect(() => {
-    const buscarVendedores = async () => {
-      if (busquedaVendedor.length < 2) return setVendedoresEncontrados([])
-      const { data, error } = await supabase
-        .from('perfiles')
-        .select('id, nombre_completo, email')
-        .eq('rol', 'ASESOR_VENTAS')
-        .ilike('nombre_completo', `%${busquedaVendedor}%`)
-        .limit(5)
-      if (!error && data) setVendedoresEncontrados(data)
+    const obtenerUsuario = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Buscamos tu nombre en la tabla perfiles
+        const { data: perfil } = await supabase
+          .from('perfiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        
+        setUsuarioActual(perfil); // Guardamos tus datos (ID y Nombre)
+      } else {
+        navigate('/'); // Si no hay usuario, fuera
+      }
     }
-    const delay = setTimeout(buscarVendedores, 300)
-    return () => clearTimeout(delay)
-  }, [busquedaVendedor])
+    obtenerUsuario();
+  }, [navigate]);
 
-  // --- FUNCIÓN DE NOTIFICACIÓN (NUEVA) ---
+  // --- FUNCIÓN DE NOTIFICACIÓN ---
   const notificarQuimicos = async (reclamo, nombreVendedor) => {
     try {
-      // 1. Buscar a todos los Químicos
       const { data: quimicos } = await supabase
         .from('perfiles')
         .select('telegram_chat_id')
@@ -46,10 +51,8 @@ export default function RegistroReclamo() {
 
       if (!quimicos || quimicos.length === 0) return;
 
-      // 2. Mensaje de Alerta
       const mensajeAlerta = `🚨 *NUEVO RECLAMO PENDIENTE*\n\nCódigo: *${reclamo.codigo_erp}*\nCliente: ${reclamo.nombre_cliente}\nVendedor: ${nombreVendedor}\n\n👉 *Motivo:* ${reclamo.motivo_reclamo}\n\nPor favor ingresa al sistema para emitir tu dictamen técnico.`;
 
-      // 3. Enviar a cada Químico encontrado
       for (const q of quimicos) {
         if (q.telegram_chat_id) {
           await fetch('https://pdznmhuhblqvcypuiicn.supabase.co/functions/v1/telegram-bot', {
@@ -73,10 +76,7 @@ export default function RegistroReclamo() {
     setLoading(true)
     setMensaje(null)
     try {
-      if (!vendedorSeleccionado) throw new Error('Debes seleccionar un vendedor.')
-      
-      const { data: { user } } = await supabase.auth.getUser()
-      const idUsuarioActual = user?.id || vendedorSeleccionado.id 
+      if (!usuarioActual) throw new Error('No se pudo identificar al vendedor. Recarga la página.')
 
       const nuevoReclamo = {
         codigo_erp: formData.codigoErp.toUpperCase(),
@@ -84,8 +84,7 @@ export default function RegistroReclamo() {
         nombre_cliente: formData.nombreCliente,
         telefono_cliente: formData.telefonoCliente,
         motivo_reclamo: formData.motivo,
-        id_quimico: idUsuarioActual, // (Opcional: Ajustar si hay lógica de asignación)
-        id_vendedor: vendedorSeleccionado.id,
+        id_vendedor: usuarioActual.id, // <--- ASIGNACIÓN AUTOMÁTICA
         estado: 'PENDIENTE'
       }
 
@@ -96,12 +95,10 @@ export default function RegistroReclamo() {
       const reclamoGuardado = data[0];
       setReclamoCreado(reclamoGuardado)
       
-      // --- DISPARAR NOTIFICACIÓN AL QUÍMICO ---
-      await notificarQuimicos(reclamoGuardado, vendedorSeleccionado.nombre_completo);
+      // Usamos tu nombre real para la notificación
+      await notificarQuimicos(reclamoGuardado, usuarioActual.nombre_completo);
 
       setFormData({ codigoErp: '', dniCliente: '', nombreCliente: '', telefonoCliente: '', motivo: '' })
-      setVendedorSeleccionado(null)
-      setBusquedaVendedor('')
 
     } catch (error) {
       setMensaje({ tipo: 'error', texto: error.message })
@@ -149,10 +146,18 @@ export default function RegistroReclamo() {
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
-             <div className="grid grid-cols-2 gap-4">
+          
+          {/* AVISO DE IDENTIDAD (Opcional, para que sepas que el sistema te reconoce) */}
+          {usuarioActual && (
+            <div className="bg-gray-50 p-2 rounded border text-sm text-gray-600 flex justify-between">
+              <span>👤 Registrando como: <strong>{usuarioActual.nombre_completo}</strong></span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-sm font-semibold text-gray-700">Código ERP</label>
-              <input required type="text" className="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ej: ABC001" 
+              <input required type="text" className="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500 outline-none uppercase" placeholder="Ej: ABC001" 
                 value={formData.codigoErp} onChange={e => setFormData({...formData, codigoErp: e.target.value})} />
             </div>
             <div>
@@ -162,30 +167,7 @@ export default function RegistroReclamo() {
             </div>
           </div>
 
-          <div className="relative">
-            <label className="text-sm font-semibold text-gray-700">Asignar Vendedor</label>
-            {vendedorSeleccionado ? (
-              <div className="flex justify-between items-center bg-green-50 p-2 rounded border border-green-200 mt-1">
-                <span className="font-bold text-green-800">{vendedorSeleccionado.nombre_completo}</span>
-                <button type="button" onClick={() => {setVendedorSeleccionado(null); setBusquedaVendedor('')}} className="text-red-500 font-bold px-2">X</button>
-              </div>
-            ) : (
-              <>
-                <input type="text" className="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Escribe 'Juan'..." 
-                  value={busquedaVendedor} onChange={e => setBusquedaVendedor(e.target.value)} />
-                {vendedoresEncontrados.length > 0 && (
-                  <ul className="absolute z-10 w-full bg-white border mt-1 rounded shadow-xl max-h-40 overflow-y-auto">
-                    {vendedoresEncontrados.map(v => (
-                      <li key={v.id} onClick={() => {setVendedorSeleccionado(v); setVendedoresEncontrados([])}} className="p-2 hover:bg-blue-50 cursor-pointer border-b">
-                        <div className="font-bold">{v.nombre_completo}</div>
-                        <div className="text-xs text-gray-500">{v.email}</div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
-            )}
-          </div>
+          {/* ELIMINADO EL CAMPO "ASIGNAR VENDEDOR" */}
 
           <div>
             <label className="text-sm font-semibold text-gray-700">Motivo</label>
@@ -204,7 +186,6 @@ export default function RegistroReclamo() {
             <input type="text" className="w-full border p-2 rounded mt-1 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="999..." 
               value={formData.telefonoCliente} onChange={e => setFormData({...formData, telefonoCliente: e.target.value})} />
           </div>
-
 
           <button disabled={loading} className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition">
             {loading ? 'Guardando...' : 'Registrar Reclamo'}
